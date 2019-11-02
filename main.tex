@@ -34,8 +34,17 @@
 \usepackage{wasysym}
 %\usepackage{MnSymbol}
 \usepackage[warn]{textcomp}
+\usepackage[font=small,labelfont=bf,textfont=bf]{caption}
+\usepackage{paralist}
 
 \usetikzlibrary{shapes.misc, positioning}
+
+\newenvironment{myitemize}
+{ \begin{itemize}
+    \setlength{\itemsep}{0pt}
+    \setlength{\parskip}{0pt}
+    \setlength{\parsep}{0pt}     }
+{ \end{itemize}                  } 
 
 
 
@@ -48,6 +57,8 @@
 \maketitle
 
 \section{Introduction}
+
+All modern revolutions have ended in a reinforcement of the power of the State.
 
 
 \section{Objects, properties, methods, and stores}
@@ -102,7 +113,7 @@ $E^{\textrm{ml(B3LYP)}}, E^{\textrm{ml(G4MP2)}} \prec E^{\textrm{$\Delta$(B3LYP,
   %}}
   \vspace{-4ex}
   \caption{Method dependencies.
-\label{fig:server}}
+\label{fig:deps}}
 \end{wrapfigure}
 
 A new value for a method $Q$, i.e., an addition to \textbf{V}($Q$), may motivate updates to ML methods $Q’$ s.t. $Q \prec Q’$. 
@@ -125,7 +136,7 @@ how frequently to do this is a question of cost/accuracy tradeoffs.
 
 
 
-\subsection{Overview}
+\subsection{Overview}\label{sec:overview}
 
 The RL system comprises four high-level components, as follows:
 
@@ -156,11 +167,11 @@ We explain how this feedback occurs in later sectiions.
 \subsection{Method servers, stores, and trainers}
 
 
-\begin{wrapfigure}[11]{r}[0pt]{0.2\textwidth}
+\begin{wrapfigure}[13]{r}[0pt]{0.25\textwidth}
 \vspace{-2ex}
   \centering
   %{\setlength{\fboxsep}{0pt}\fbox{%
-  \includegraphics[width=0.2\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/servers.png}
+  \includegraphics[width=0.25\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/servers.png}
   %}}
   \vspace{-4ex}
   \caption{Method server and other components.
@@ -226,7 +237,7 @@ The various components can run synchronously or asynchronously, depending on whe
 \begin{figure}
   \centering
   %{\setlength{\fboxsep}{0pt}\fbox{%
-  \includegraphics[width=0.9\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/arch.png}
+  \includegraphics[width=0.8\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/arch.png}
   %}}
   \vspace{-1.5ex}
   \caption{TBD}
@@ -238,7 +249,7 @@ The various components can run synchronously or asynchronously, depending on whe
 We now turn to the question of how to implement the logical architecture, for example on a large parallel computer. 
 We propose the architecture shown in Figure~\ref{fig:arch}, which we now outline, from top to bottom.
 
-\textbf{Generator, Scorer, Selector, Evaluator}: The upper part of the figure shows the four components that we introduced in Section~\ref{sec:xxx}:
+\textbf{Generator, Scorer, Selector, Evaluator}: The upper part of the figure shows the four components that we introduced in Section~\ref{sec:overview}:
 the generator, scorer, selector, and evaluator. 
 As described earlier, designs are passed from the generator to th Scorer, Selector, and Evaluator.
 We envision each of these components operating as a single process.
@@ -285,40 +296,97 @@ The following is an example of a configuration that we might deploy for the elec
 \noindent
 \textbf{Method server}\\
 State:
-\begin{itemize}
-\itemsep-0.3em 
+\begin{compactitem}
 \item
-Identity of method, M, to be applied
+Identity of method, $M$, to be applied
 \item
-Identity of results server, R
+Identity of results server, $R$
 \item
-Identify of executor, E
-\end{itemize}
+Identify of executor, $E$
+\end{compactitem}
 Functions:
-\begin{itemize}
-\itemsep-0.3em 
+\begin{compactitem}
 \item 
 Score a design using method:
-\begin{itemize}
-\itemsep-0.3em 
+\begin{compactitem}
 \item
-Send task M(design) to E
+Send task $M$(design) to $E$
 \item
-Send result to R
-\end{itemize}
+Send result to $R$
+\end{compactitem}
 \item
 Update method (if ML method) 
-\end{itemize}
+\end{compactitem}
 
-Results server
+\vspace{1ex}
+
+\noindent
+\textbf{Results server}\\
 State:
+\begin{compactitem}
+\item
 Previously recorded values
+\item
 Clients to notify of new values (?)
+\end{compactitem}
 Functions:
-Record (key, value) pair(s)
-And notify registered clients (?)
+\begin{compactitem}
+\item
+Record (key, value) pair(s) -- And notify registered clients (?)
+\item
 Retrieve specified or all values
+\item
 Archive old values on model update (?)
+\end{compactitem}
+
+\vspace{1ex}
+
+\noindent
+\textbf{Trainer}\\
+State:
+\begin{compactitem}
+\item
+Identify of results server, $R$
+\item
+Identify of methods server, $M$
+\item
+Identity of executor, $E$
+\end{compactitem}
+Functions:
+\begin{compactitem}
+\item
+Retrain ML model
+\item
+Retrieve values from R
+\item
+Send task to E to retrain model 
+\item
+Update model in M
+\end{compactitem}
+
+
+\vspace{1ex}
+
+\noindent
+\textbf{Executor}\\
+State:
+\begin{compactitem}
+\item
+Currently active tasks
+\item
+Available resources
+\end{compactitem}
+Functions:
+\begin{compactitem}
+\item
+Create a task, with specified executable, inputs, resources
+\item
+Monitor a task
+\item
+Manage a task
+\item
+Set policies for resource allocation (?)
+\end{compactitem}
 
 
 
