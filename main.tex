@@ -1,8 +1,46 @@
-\documentclass{article}
+\documentclass[10pt]{article}
 \usepackage[utf8]{inputenc}
 
+\usepackage[letterpaper,margin=1.00in]{geometry}
+\usepackage{graphicx}
+\usepackage{epstopdf}
+\usepackage{amsmath,amssymb}
+\usepackage{times}
+\usepackage{booktabs}
+\usepackage{framed,url}
+\usepackage{paralist}
+\usepackage{listings}
+\usepackage[colorlinks,linkcolor=blue, citecolor=blue]{hyperref}
+\usepackage{doi} 	% For making DOI's clickable in bibliography
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{graphicx}
+%\usepackage{multirow}
+%\usepackage{pdfsync}
+%\usepackage{color}
+\usepackage[usenames,dvipsnames,svgnames]{xcolor}
+%\usepackage{bbm}
+%\usepackage{verbatim} % Allows for comment environment
+\usepackage{wrapfig}
+%\usepackage{pdfpages}           % For inserting pdf pages and colors
+%\usepackage{mdwlist}
+%\usepackage{refcheck}           % For checking references
+%\usepackage{enumitem}
+%\usepackage{outline}
+%\usepackage{xspace}
+%\usepackage{paralist}
+\usepackage{pgfgantt}
+\usepackage{pifont}
+\usepackage{lipsum}
+\usepackage{wasysym}
+%\usepackage{MnSymbol}
+\usepackage[warn]{textcomp}
+
+\usetikzlibrary{shapes.misc, positioning}
+
+
+
 \title{Recode}
-\author{Ian Foster}
+%\author{Ian Foster}
 \date{November 2019}
 
 \begin{document}
@@ -10,5 +48,320 @@
 \maketitle
 
 \section{Introduction}
+
+
+\section{Objects, properties, methods, and stores}
+
+Our goal is to identify interesting objects in an extremely large space of possible objects.
+For example, the objects might be molecules, the properties might be energy, stability, and toxicity, and we want molecules with property values that make for good electrolytes. 
+The characteristics of an object $m$ are defined in terms of various \textbf{properties}, $P_i(m)$.
+
+We typically cannot determine any $P_i(m)$ precisely. Instead, for a particular property $P_i$, we can have various \textbf{methods}, $P_i^k$, 
+each of which can be used to obtain estimates of $P_i(m)$ values. In the molecular design case, these methods could be, for example, 
+a particular experimental protocol; 
+a quantum mechanics (QM) code; 
+a database collected from the literature; or
+a machine-learned (ML) model based on property value estimate values produced by any other method.
+During the discovery process, a method $P_i^k$ may be applied to a series of objects. 
+We typically record the values obtained in a \textbf{store}, \textbf{V}($P_i^k$).
+
+
+We may use multiple methods for the same property, with different characteristics, such as the set of molecules to which it can be applied (its domain); 
+its computational costs for different objects; and its accuracies and uncertainties.
+For example, for a property $E$, we might have:
+\begin{itemize}\itemsep-0.2em 
+\item
+$E^{\textrm{G4MP2}}$, a QM code that produces high-fidelity DFT-G4MP2 calculations of $E$. 
+This model produces high-accuracy estimates of $E$, but is expensive to run, and thus its domain of applicability is limited to smaller molecules.
+%Expensive to run (hours), higher accuracy; domain limited by cost
+\item
+$E^{\textrm{B3LYP}}$, a QM code that produces lower-fidelity DFT-B3LYP calculations of $E$. This model produces lower-accuracy estimates of $E$ than
+does $E^{\textrm{G4MP2}}$, but is cheaper to run. Nevertheless, its computational costs still limit its domain of applicability.
+\item
+$E^{\textrm{ml(G4MP2)}}$, an ML model trained on \textbf{V}($E^{\textrm{G4MP2}}$).
+This model is cheap to run but has lower accuracy than either of the first two methods. It is expensive to train.
+\item
+$E^{\textrm{ml(B3LYP)}}$, an ML model trained on \textbf{V}($E^{\textrm{B3LYP}}$).
+This model is is less accurate than $E^{\textrm{ml(G4MP2)}}$, but otherwise has similar characteristics.
+\item
+$E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$, a delta-learning ML model trained on \textbf{V}($E^{\textrm{B3LYP}}$) and  \textbf{V}($E^{\textrm{G4MP2}}$) 
+that can be applied to a value $E^{\textrm{B3LYP}}(m)$ to obtain an estimate of $E^{\textrm{G4MP2}}(m)$.
+Cheap to run, expensive to train, accuracy between $E^{\textrm{B3LYP}}$ and $E^{\textrm{G4MP2}}$, domain is \textbf{V}($E^{\textrm{B3LYP}}$).
+\end{itemize}
+
+If one method, $Q$, is defined relative to another, $P$, we say $P\prec Q$.
+Thus, in our example,
+$E^{\textrm{B3LYP}} \prec E^{\textrm{ml(B3LYP)}}$, $E^{\textrm{G4MP2}} \prec E^{\textrm{ml(G4MP2)}}$, and
+$E^{\textrm{ml(B3LYP)}}, E^{\textrm{ml(G4MP2)}} \prec E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$.
+
+\begin{wrapfigure}[11]{r}[0pt]{0.2\textwidth}
+\vspace{-2ex}
+  \centering
+  %{\setlength{\fboxsep}{0pt}\fbox{%
+  \includegraphics[width=0.2\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/deps.png}
+  %}}
+  \vspace{-4ex}
+  \caption{Method dependencies.
+\label{fig:server}}
+\end{wrapfigure}
+
+A new value for a method $Q$, i.e., an addition to \textbf{V}($Q$), may motivate updates to ML methods $Q’$ s.t. $Q \prec Q’$. 
+(We say ``may'' because we likely will not want to update methods for every new value.)
+For example:
+\begin{itemize}\itemsep-0.2em 
+\item
+A new $E^{\textrm{G4MP2}}$ value may motivate retraining (i.e., updating) $E^{\textrm{ml(G4MP2)}}$ and/or $E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$.
+\item
+In the case of delta-learning methods, a new value for one method may alter the domain of another.
+For example, a new $E^{\textrm{B3LYP}}$  value, $v$, increases the domain of $E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$ if $v \notin \textbf{V}(E^{\textrm{G4MP2}}$
+\end{itemize}
+
+When a method $Q$ is updated, we may want to discard \textbf{V}($Q$);
+how frequently to do this is a question of cost/accuracy tradeoffs.
+
+
+\section{The Reinforcement Learning Workflow}
+
+
+
+
+\subsection{Overview}
+
+The RL system comprises four high-level components, as follows:
+
+\begin{itemize}
+\itemsep-0.2em 
+\item
+The \emph{generator} constructs new designs by using one or more RL agents to explore incrementally the target design space.
+
+\item
+The \emph{scorer} determines scores for each of the designs produced by the generator, by applying various methods.
+These are typically lower-cost (and thus lower-accuracy) methods because they need to be applied to many designs.
+
+\item
+The \emph{selector} chooses scored designs to be passed to the simulator.
+A variety of strategies may be applied here. For example, following an active learning strategy, it may select a mix of high-scoring and high-uncertainty designs.
+
+\item
+The \emph{evaluator} applies one or several more expensive methods to the designs passed on by the selector, with the goal of obtaining more accurate 
+values for the properties that those methods determine. 
+In the work that we perform here, these methods always involve simulations, but in other cases they could involve experiments.
+
+\end{itemize}
+
+The results computed by the evaluator must eventually feedback to the other phases to influencing the future behavior of the generator, scorer, and/or evaluator. 
+We explain how this feedback occurs in later sectiions.
+
+
+\subsection{Method servers, stores, and trainers}
+
+
+\begin{wrapfigure}[11]{r}[0pt]{0.2\textwidth}
+\vspace{-2ex}
+  \centering
+  %{\setlength{\fboxsep}{0pt}\fbox{%
+  \includegraphics[width=0.2\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/servers.png}
+  %}}
+  \vspace{-4ex}
+  \caption{Method server and other components.
+\label{fig:server}}
+\end{wrapfigure}
+
+Figure~\ref{fig:server} shows three important components of the RL architecture: method servers, stores, and trainers. We describe each in turn and then examine their relationships.
+We provide more detailed descriptions in Section~\ref{sec:details}.
+\begin{itemize}
+\itemsep-0.3em 
+\item
+A \textbf{method server} responds to requests to apply a method to a design and return a value. 
+A method server is represented by a pentagon, $\pentagon$, labeled with the name of the method: in this case, \textbf{P}. 
+\item
+A \textbf{store} responds to requests to store and retrieve results computed for a particular method..
+A store is represented by a circle, \textbigcircle,
+labeled with \textbf{V(\emph{p})}, where \emph{p} is the name of the method for which the store records values.
+\item
+A \textbf{trainer} responds to requests to retrain its associated model with supplied data.
+A trainer is represented as a rounded rectangle, \begin{tikzpicture}\draw[rounded corners] (0, 0) rectangle (0.6, 0.3) {}; \end{tikzpicture}, labeled with the name of the method for which it performs training.
+\end{itemize}
+
+As shown in Figure~\ref{fig:server}, these three components are connected. 
+A method server \emph{S} is typically associated with a store \textbf{V}(\emph{S}) used to store all results computed by \emph{S}.
+In the case of machine-learned methods, an associated trainer \textbf{train}(\emph{S}) may be used to update the method when new data become available,
+in which case the method server \emph{S} needs to respond also to requests to update its method.
+We may also want to be able to request the associated store, \textbf{V}(\emph{S}), to archive data computed with the previous method.
+
+
+Questions:
+\begin{itemize}
+\item
+P = property. But may have different methods for one property??
+\item
+Do we want method servers to update store directly, etc.?
+\end{itemize}
+
+%A number of methods, each represented as a service        that processes requests to:
+%Evaluate a design, and to record evaluation result in an associated store
+%Update its implementation, and archive previous evaluation results
+
+\subsection{Logical architecture}
+
+\begin{figure}
+  \centering
+  %{\setlength{\fboxsep}{0pt}\fbox{%
+  \includegraphics[width=0.9\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/sketch.png}
+  %}}
+  \vspace{-1.5ex}
+  \caption{TBD}
+\label{fig:sketch}
+\end{figure}
+
+
+
+Figure~\ref{fig:sketch} shows the four components of the discovery workflow plus different methods: 
+the Q-agent, three ML methods (\textbf{A}, \textbf{B}, \textbf{C}), and two simulation methods (\textbf{M}, \textbf{N}).
+
+The various components can run synchronously or asynchronously, depending on whether an RL agent that generates a set of designs, \emph{X}, does or does not wait, respectively, for A and C to be updated based on \textbf{M}(\emph{X’}) and \textbf{N}(\emph{X’}) (\emph{X’} $\subset$ \emph{X})  before starting the next cycle. We need to evaluate how this effects results obtained.
+
+
+
+\begin{figure}
+  \centering
+  %{\setlength{\fboxsep}{0pt}\fbox{%
+  \includegraphics[width=0.9\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/arch.png}
+  %}}
+  \vspace{-1.5ex}
+  \caption{TBD}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Implementation architecture}
+
+We now turn to the question of how to implement the logical architecture, for example on a large parallel computer. 
+We propose the architecture shown in Figure~\ref{fig:arch}, which we now outline, from top to bottom.
+
+\textbf{Generator, Scorer, Selector, Evaluator}: The upper part of the figure shows the four components that we introduced in Section~\ref{sec:xxx}:
+the generator, scorer, selector, and evaluator. 
+As described earlier, designs are passed from the generator to th Scorer, Selector, and Evaluator.
+We envision each of these components operating as a single process.
+%with state (objects) either passed between the elements via message passing or via the Store, 
+
+As described earlier, these components evaluate designs by applying various methods. 
+We envision this process involving calls to method servers, 
+
+%Application pipeline
+%Synposis: Designs from the Generator are passed to the Scorer, Selector, and Simulator. For each design generated or received, the Generator, Selector, and Simulator issue Score requests to one or more Method Servers. 
+%Size: These may each be a single process, with state (designs) maintained in the Store.
+
+
+\textbf{Method Servers, Results Servers, Trainers}: 
+Synopsis: These components dispatch tasks to the Executor and coordinate activities with each other, with state maintained in the Store.
+Size: These may each be a single process, with state (e.g., values) maintained in Store.
+
+
+\textbf{Executors}:
+Synopsis: The Executor accepts requests to run tasks, tracks their status, and reports results. (As tasks may range in size from a few ms on one core to 1000s of core-hours, we may want several executors.) The Store maintains state. (We may want different levels of persistence.)
+Size: Executor(s) may each be a single process.
+
+\textbf{Store}: 
+
+\textbf{Physical resources}: 
+Synopsis: These are the physical resources that execute programs and store data.
+Size: Perhaps tens of thousands of nodes and many terabytes of storage.
+
+\subsection{An example configuration}
+
+The following is an example of a configuration that we might deploy for the electrolyte design problem.
+
+\begin{itemize}
+\item
+
+
+\item
+
+\end{itemize}
+
+
+\section{Method Descriptions}\label{sec:details}
+
+\noindent
+\textbf{Method server}\\
+State:
+\begin{itemize}
+\itemsep-0.3em 
+\item
+Identity of method, M, to be applied
+\item
+Identity of results server, R
+\item
+Identify of executor, E
+\end{itemize}
+Functions:
+\begin{itemize}
+\itemsep-0.3em 
+\item 
+Score a design using method:
+\begin{itemize}
+\itemsep-0.3em 
+\item
+Send task M(design) to E
+\item
+Send result to R
+\end{itemize}
+\item
+Update method (if ML method) 
+\end{itemize}
+
+Results server
+State:
+Previously recorded values
+Clients to notify of new values (?)
+Functions:
+Record (key, value) pair(s)
+And notify registered clients (?)
+Retrieve specified or all values
+Archive old values on model update (?)
+
+
+
+\section{RL use case}
+
+
+
+
+
+\section{Requirements}
+
+\begin{itemize}
+\item
+Task creation and management within a single HPC session.
+\begin{itemize}
+\item Creation of persistent and transient processes.We want to be able to allocate \textbf{N} $\ge$  \textbf{A} +  \textbf{B} +  \textbf{C} nodes and then:
+\begin{itemize}
+\item
+Start  \textbf{A} persistent manager processes, each on a single node
+\item
+Run many transient single-node tasks on another \textbf{B} nodes. (If using Parsl, that means starting B persistent worker processes on B nodes.)
+\item
+Run many transient multiple-node MPI computations on  \textbf{C} nodes.
+\end{itemize}
+\item
+Where managers can monitor (e.g., detect failure) and manage (e.g., terminate, restart) their workers and MPI computations
+\end{itemize}
+\item
+Communication:
+\begin{itemize}
+\item
+Managers can pass information to the single-node tasks of (b) above and the MPI computations of (c) above, and get results back. I.e., conventional Parsl functional semantics.
+\item
+Managers can communicate in some convenient manner (e.g., message passing)
+\item
+Processes can also read and write a shared RAM/NVRAM store
+\end{itemize}
+\end{itemize}
+
+My understanding is that with \texttt{MPIX\_Comm\_launch}, we can do this all on a Linux cluster, but not on Summit or Theta, and without the convenience of Parsl and Radical.
+
+
+
+
 
 \end{document}
