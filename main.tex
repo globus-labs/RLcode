@@ -38,6 +38,7 @@
 \usepackage{paralist}
 \usepackage{siunitx}
 \sisetup{detect-all}
+\usepackage{appendix}
 
 \usetikzlibrary{shapes.misc, positioning}
 
@@ -458,12 +459,18 @@ This paper describes creating many fine-grained tasks on Summit~\cite{turilli201
 
 TBD
 
+%\addcontentsline{toc}{chapter}{Literature cited}
+\bibliographystyle{unsrt}
+\bibliography{refs}
 
+\addcontentsline{toc}{section}{Appendices}
+\appendix
+\appendixpage
 \section{Service Descriptions}\label{sec:details}
 
 We outline what we think are the internal state and operations supported by the method server, result server, trainer, and executor.
 
-\vspace{2ex}
+\vspace{3ex}
 
 \noindent
 \textbf{Method server}\\
@@ -490,7 +497,7 @@ Send result to $R$
 Update method (if ML method) 
 \end{compactitem}
 
-\vspace{2ex}
+\vspace{3ex}
 
 \noindent
 \textbf{Value server}\\
@@ -511,7 +518,7 @@ Retrieve specified or all values
 Archive old values on model update (?)
 \end{compactitem}
 
-\vspace{2ex}
+\vspace{3ex}
 
 \noindent
 \textbf{Trainer}\\
@@ -537,7 +544,7 @@ Update model in M
 \end{compactitem}
 
 
-\vspace{2ex}
+\vspace{3ex}
 
 \noindent
 \textbf{Executor}\\
@@ -559,11 +566,6 @@ Manage a task
 \item
 Set policies for resource allocation (?)
 \end{compactitem}
-
-
-%\addcontentsline{toc}{chapter}{Literature cited}
-\bibliographystyle{unsrt}
-\bibliography{refs}
 
 
 \end{document}
