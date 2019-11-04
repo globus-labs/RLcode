@@ -36,19 +36,15 @@
 \usepackage[warn]{textcomp}
 \usepackage[font=small,labelfont=bf,textfont=bf]{caption}
 \usepackage{paralist}
+\usepackage{siunitx}
+\sisetup{detect-all}
 
 \usetikzlibrary{shapes.misc, positioning}
 
-\newenvironment{myitemize}
-{ \begin{itemize}
-    \setlength{\itemsep}{0pt}
-    \setlength{\parskip}{0pt}
-    \setlength{\parsep}{0pt}     }
-{ \end{itemize}                  } 
+\newcommand\q[1]{{\color{blue}[Q: #1]}}
 
 
-
-\title{Recode}
+\title{Reinforcement Learning Workflow and Requirements for Massively Parallel Implementation}
 %\author{Ian Foster}
 \date{November 2019}
 
@@ -58,14 +54,65 @@
 
 \section{Introduction}
 
-All modern revolutions have ended in a reinforcement of the power of the State.
+The goal here is to describe briefly the reinforcement learning (RL) pipeline that we are developing for electrolyte design and other purposes,
+and, from there, develop requirements for HPC system software.
 
 
-\section{Objects, properties, methods, and stores}
+\section{The reinforcement learning pipeline}\label{sec:overview} 
 
-Our goal is to identify interesting objects in an extremely large space of possible objects.
-For example, the objects might be molecules, the properties might be energy, stability, and toxicity, and we want molecules with property values that make for good electrolytes. 
-The characteristics of an object $m$ are defined in terms of various \textbf{properties}, $P_i(m)$.
+
+The RL pipelines comprises the four high-level components shown in Figure~\ref{fig:pipe}. These components operate in a pipeline, as follows.
+
+\begin{itemize}
+\itemsep-0.2em 
+\item
+The \emph{generator} constructs large numbers of candidate designs by using one or more RL agents to explore incrementally the target design space.
+It uses a cheap method (e.g., a simple ML model) to obtain rough estimates of design quality and passes on promising candidates to the next phase.
+
+\item
+The \emph{scorer} applies one or more methods to each design passed to it by the generator, 
+and the passes the design plus the resulting values (the design's ``score'') to the selector. 
+The methods used here for scoring are typically ML models that can be executed quickly, because they must be applied to many designs.
+% These are typically lower-cost (and thus lower-accuracy) methods because they need to be applied to many designs.
+
+\item
+The \emph{selector} chooses designs to be passed to the simulator.
+A variety of strategies may be applied here. 
+For example, following an active learning strategy, it may select a mix of high-scoring and high-uncertainty designs.
+
+\item
+The \emph{evaluator} applies more expensive methods to the designs passed on by the selector, 
+with the goal of obtaining accurate estimates of various properties. 
+In the work that we perform here, these methods always involve simulations, but in other cases they could involve experiments.
+
+\end{itemize}
+
+\begin{figure}[h]
+  \centering
+  %{\setlength{\fboxsep}{0pt}\fbox{%
+  \includegraphics[width=0.9\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/pipe.png}
+  %}}
+  \vspace{-1.5ex}
+  \caption{A high-level view of the RL pipeline.}
+\label{fig:pipe}
+\end{figure}
+
+
+The results computed by the evaluator must eventually feed back to the other phases to influencing the future behavior of the generator, scorer, and/or evaluator. 
+(For example, simulation outputs may be used to retrain the ML models used in the generator and scoring phases.)
+The RL process is then repeated.
+We discuss the feedback process in later sections.
+
+The complete pipeline thus involves a variety of different computations, including RL generation,  ML inference, ML training, and simulation.
+We will typically want many of these computations to to run at once, to make good use of a large computer and avoid excessive file system accesses.
+
+
+\section{Concepts and terminology}
+
+Our goal is to identify interesting \textbf{objects} in an extremely large space of possible objects,
+where ``interesting" is defined in terms of \textbf{properties}, $P_i$.
+For example, if the objects are molecules, we might define interesting in terms of three properties: energy, stability, and toxicity.
+Thus, for any candidate molecule $m$, we want to know $P_{\textrm{energy}}$($m)$, $P_{\textrm{stability}}$($m)$, and $P_{\textrm{toxicity}}$($m)$.
 
 We typically cannot determine any $P_i(m)$ precisely. Instead, for a particular property $P_i$, we can have various \textbf{methods}, $P_i^k$, 
 each of which can be used to obtain estimates of $P_i(m)$ values. In the molecular design case, these methods could be, for example, 
@@ -74,39 +121,44 @@ a quantum mechanics (QM) code;
 a database collected from the literature; or
 a machine-learned (ML) model based on property value estimate values produced by any other method.
 During the discovery process, a method $P_i^k$ may be applied to a series of objects. 
-We typically record the values obtained in a \textbf{store}, \textbf{V}($P_i^k$).
+We denote the \textbf{values} computed by a method $P_i^k$ as \textbf{V}($P_i^k$).
 
+\subsection{Relationships among methods}
 
-We may use multiple methods for the same property, with different characteristics, such as the set of molecules to which it can be applied (its domain); 
-its computational costs for different objects; and its accuracies and uncertainties.
+We may use multiple methods for the same property, each with different characteristics.
+Important characteristics can include the set of objects to which it can be applied (its domain); 
+its computational costs for different objects; and its accuracies and uncertainties for different objects.
 For example, for a property $E$, we might have:
+
 \begin{itemize}\itemsep-0.2em 
 \item
-$E^{\textrm{G4MP2}}$, a QM code that produces high-fidelity DFT-G4MP2 calculations of $E$. 
+$E^{\textrm{G4}}$, a QM code that produces high-fidelity DFT-G4MP2 calculations of $E$. 
 This model produces high-accuracy estimates of $E$, but is expensive to run, and thus its domain of applicability is limited to smaller molecules.
 %Expensive to run (hours), higher accuracy; domain limited by cost
 \item
-$E^{\textrm{B3LYP}}$, a QM code that produces lower-fidelity DFT-B3LYP calculations of $E$. This model produces lower-accuracy estimates of $E$ than
-does $E^{\textrm{G4MP2}}$, but is cheaper to run. Nevertheless, its computational costs still limit its domain of applicability.
+$E^{\textrm{B3}}$, a QM code that produces lower-fidelity DFT-B3LYP calculations of $E$. This model produces lower-accuracy estimates of $E$ than
+does $E^{\textrm{G4}}$, but is cheaper to run. Nevertheless, its computational costs still limit its domain of applicability.
 \item
-$E^{\textrm{ml(G4MP2)}}$, an ML model trained on \textbf{V}($E^{\textrm{G4MP2}}$).
+$E^{\textrm{ml(G4)}}$, an ML model trained on \textbf{V}($E^{\textrm{G4}}$).
 This model is cheap to run but has lower accuracy than either of the first two methods. It is expensive to train.
 \item
-$E^{\textrm{ml(B3LYP)}}$, an ML model trained on \textbf{V}($E^{\textrm{B3LYP}}$).
-This model is is less accurate than $E^{\textrm{ml(G4MP2)}}$, but otherwise has similar characteristics.
+$E^{\textrm{ml(B3)}}$, an ML model trained on \textbf{V}($E^{\textrm{B3}}$).
+This model is is less accurate than $E^{\textrm{ml(G4)}}$, but otherwise has similar characteristics.
 \item
-$E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$, a delta-learning ML model trained on \textbf{V}($E^{\textrm{B3LYP}}$) and  \textbf{V}($E^{\textrm{G4MP2}}$) 
-that can be applied to a value $E^{\textrm{B3LYP}}(m)$ to obtain an estimate of $E^{\textrm{G4MP2}}(m)$.
-Cheap to run, expensive to train, accuracy between $E^{\textrm{B3LYP}}$ and $E^{\textrm{G4MP2}}$, domain is \textbf{V}($E^{\textrm{B3LYP}}$).
+$E^{\textrm{$\Delta$(B3, G4)}}$, a delta-learning ML model trained on \textbf{V}($E^{\textrm{B3}}$) and  \textbf{V}($E^{\textrm{G4}}$) 
+that can be applied to a value $E^{\textrm{B3}}(m)$ to obtain an estimate of $E^{\textrm{G4}}(m)$.
+This model is also cheap to run and expensive to train; its accuracy is between that of $E^{\textrm{B3}}$ and $E^{\textrm{G4}}$ and its domain is \textbf{V}($E^{\textrm{B3}}$).
 \end{itemize}
 
 If one method, $Q$, is defined relative to another, $P$, we say $P\prec Q$.
 Thus, in our example,
-$E^{\textrm{B3LYP}} \prec E^{\textrm{ml(B3LYP)}}$, $E^{\textrm{G4MP2}} \prec E^{\textrm{ml(G4MP2)}}$, and
-$E^{\textrm{ml(B3LYP)}}, E^{\textrm{ml(G4MP2)}} \prec E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$.
+$E^{\textrm{B3}} \prec E^{\textrm{ml(B3)}}$, $E^{\textrm{G4}} \prec E^{\textrm{ml(G4)}}$, and
+$E^{\textrm{B3}}, E^{\textrm{G4}} \prec E^{\textrm{$\Delta$(B3, G4)}}$: see Figure~\ref{fig:deps}.
 
-\begin{wrapfigure}[11]{r}[0pt]{0.2\textwidth}
-\vspace{-2ex}
+\subsection{Updating methods}
+
+\begin{wrapfigure}[8]{r}[0pt]{0.2\textwidth}
+\vspace{-3ex}
   \centering
   %{\setlength{\fboxsep}{0pt}\fbox{%
   \includegraphics[width=0.2\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/deps.png}
@@ -121,97 +173,137 @@ A new value for a method $Q$, i.e., an addition to \textbf{V}($Q$), may motivate
 For example:
 \begin{itemize}\itemsep-0.2em 
 \item
-A new $E^{\textrm{G4MP2}}$ value may motivate retraining (i.e., updating) $E^{\textrm{ml(G4MP2)}}$ and/or $E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$.
+A new $E^{\textrm{G4}}$ value may motivate retraining (i.e., updating) $E^{\textrm{ml(G4)}}$ and/or $E^{\textrm{$\Delta$(B3, G4)}}$.
 \item
 In the case of delta-learning methods, a new value for one method may alter the domain of another.
-For example, a new $E^{\textrm{B3LYP}}$  value, $v$, increases the domain of $E^{\textrm{$\Delta$(B3LYP,G4MP2)}}$ if $v \notin \textbf{V}(E^{\textrm{G4MP2}}$
+For example, a new $E^{\textrm{B3}}$  value, $v$, increases the domain of $E^{\textrm{$\Delta$(B3, G4)}}$ if $v \notin \textbf{V}(E^{\textrm{G4}})$
 \end{itemize}
 
 When a method $Q$ is updated, we may want to discard \textbf{V}($Q$);
 how frequently to do this is a question of cost/accuracy tradeoffs.
 
+\subsection{Method servers, value servers, and trainers}
 
-\section{The Reinforcement Learning Workflow}
+The Generator, Scorer, and Evaluator components in Figure~\ref{fig:pipe} call various methods to estimate different properties of objects.
+We find it useful to introduce three additional types of components to encapsulate the major operations associated with methods,
+namely executing a method on an object, storing the resulting values, and (in the case of ML methods) retraining.  
+Figure~\ref{fig:server} shows these three components. 
+We describe each in turn and then examine their relationships.
+We provide more detailed descriptions in Section~\ref{sec:details}.
 
-
-
-
-\subsection{Overview}\label{sec:overview}
-
-The RL system comprises four high-level components, as follows:
-
-\begin{itemize}
-\itemsep-0.2em 
-\item
-The \emph{generator} constructs new designs by using one or more RL agents to explore incrementally the target design space.
-
-\item
-The \emph{scorer} determines scores for each of the designs produced by the generator, by applying various methods.
-These are typically lower-cost (and thus lower-accuracy) methods because they need to be applied to many designs.
-
-\item
-The \emph{selector} chooses scored designs to be passed to the simulator.
-A variety of strategies may be applied here. For example, following an active learning strategy, it may select a mix of high-scoring and high-uncertainty designs.
-
-\item
-The \emph{evaluator} applies one or several more expensive methods to the designs passed on by the selector, with the goal of obtaining more accurate 
-values for the properties that those methods determine. 
-In the work that we perform here, these methods always involve simulations, but in other cases they could involve experiments.
-
-\end{itemize}
-
-The results computed by the evaluator must eventually feedback to the other phases to influencing the future behavior of the generator, scorer, and/or evaluator. 
-We explain how this feedback occurs in later sectiions.
-
-
-\subsection{Method servers, stores, and trainers}
-
-
-\begin{wrapfigure}[13]{r}[0pt]{0.25\textwidth}
+\begin{wrapfigure}[11]{r}[0pt]{0.22\textwidth}
 \vspace{-2ex}
   \centering
   %{\setlength{\fboxsep}{0pt}\fbox{%
-  \includegraphics[width=0.25\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/servers.png}
+  \includegraphics[width=0.22\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/servers.png}
   %}}
   \vspace{-4ex}
   \caption{Method server and other components.
 \label{fig:server}}
 \end{wrapfigure}
 
-Figure~\ref{fig:server} shows three important components of the RL architecture: method servers, stores, and trainers. We describe each in turn and then examine their relationships.
-We provide more detailed descriptions in Section~\ref{sec:details}.
+
 \begin{itemize}
 \itemsep-0.3em 
 \item
 A \textbf{method server} responds to requests to apply a method to a design and return a value. 
-A method server is represented by a pentagon, $\pentagon$, labeled with the name of the method: in this case, \textbf{P}. 
+A method server is represented by a pentagon, $\pentagon$, labeled with the name of the method: in this case, \emph{M}. 
 \item
-A \textbf{store} responds to requests to store and retrieve results computed for a particular method..
-A store is represented by a circle, \textbigcircle,
-labeled with \textbf{V(\emph{p})}, where \emph{p} is the name of the method for which the store records values.
+A \textbf{value server} responds to requests to record and retrieve values computed by a particular method.
+A value server is represented by a circle, \textbigcircle,
+labeled \textbf{V}(\emph{M}), where \emph{M} is the name of the method for which the server records values.
 \item
 A \textbf{trainer} responds to requests to retrain its associated model with supplied data.
-A trainer is represented as a rounded rectangle, \begin{tikzpicture}\draw[rounded corners] (0, 0) rectangle (0.6, 0.3) {}; \end{tikzpicture}, labeled with the name of the method for which it performs training.
+A trainer is represented as a rounded rectangle, \begin{tikzpicture}\draw[rounded corners] (0, 0) rectangle (0.6, 0.3) {}; \end{tikzpicture}, labeled \textbf{T}(\emph{M}),
+where \emph{M} is once again the name of the method for which it performs training.
 \end{itemize}
+
+\q{Do we want method servers to update value servers directly, or have an overall manager handle that?}
+
+
 
 As shown in Figure~\ref{fig:server}, these three components are connected. 
-A method server \emph{S} is typically associated with a store \textbf{V}(\emph{S}) used to store all results computed by \emph{S}.
-In the case of machine-learned methods, an associated trainer \textbf{train}(\emph{S}) may be used to update the method when new data become available,
-in which case the method server \emph{S} needs to respond also to requests to update its method.
-We may also want to be able to request the associated store, \textbf{V}(\emph{S}), to archive data computed with the previous method.
+A method server \emph{M} is typically associated with a value server \textbf{V}(\emph{M}) used to record values computed by \emph{M}.
+In the case of machine-learned methods, an associated trainer \textbf{T}(\emph{M}) may be used to update the method when new values become available,
+in which case the method server \emph{M} needs to respond also to requests to update its method.
+We may also want to be able to request the associated value server to archive data computed with the previous method.
 
 
-Questions:
-\begin{itemize}
+
+\subsection{More on the generator}
+
+\begin{wrapfigure}[11]{r}[0pt]{0.22\textwidth}
+\vspace{-2ex}
+  \centering
+  %{\setlength{\fboxsep}{0pt}\fbox{%
+  \includegraphics[width=0.22\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/rl.png}
+  %}}
+  \vspace{-4ex}
+  \caption{Reinforcement learning process.
+\label{fig:rl}}
+\end{wrapfigure}
+
+The inputs to the generator are a reward function, $R$ (e.g., $E^{\textrm{ml(B3)}}$); an initial Q-function; an initial state, $s$ (e.g., a promising molecule); and a Q-function
+retraining frequency. 
+The generator then repeatedly deepens the design space, as follows (see Figure~\ref{fig:rl}).
+
+\begin{itemize}\itemsep-0.2em 
 \item
-P = property. But may have different methods for one property??
+For each action $a$ that is possible from current state $s$:
+\begin{compactitem}
 \item
-Do we want method servers to update store directly, etc.?
+Determine new state $s’$
+\item
+Use $R$ to determine reward for $s’$
+\item
+Use $Q$ to estimate value for $s’$: val($s’$) = max$_a$ $Q$($s’$, $a$)
+\item
+Record ($s$, $s’$, $R$($s’$)) in \textbf{V}($Q$)
+\item
+Select new state $s’$, e.g., the one with largest $R$($s’$) + val($s’$)
+\end{compactitem}
+\item
+Periodically, update $Q$ by retraining based on available \textbf{V}($Q$). Retraining can be synchronous or asynchronous.
+\item
+Stop when termination criteria (e.g., max number of steps) reached
 \end{itemize}
 
-%A number of methods, each represented as a service        that processes requests to:
-%Evaluate a design, and to record evaluation result in an associated store
-%Update its implementation, and archive previous evaluation results
+\noindent
+The outputs are a set of states, \textbf{V}($Q$), and a retrained $Q$.
+
+
+%The RL system comprises four high-level components, as follows:
+%
+%\begin{itemize}
+%\itemsep-0.2em 
+%\item
+%The \emph{generator} constructs new designs by using one or more RL agents to explore incrementally the target design space.
+%
+%\item
+%The \emph{scorer} determines scores for each of the designs produced by the generator, by applying various methods.
+%These are typically lower-cost (and thus lower-accuracy) methods because they need to be applied to many designs.
+%
+%\item
+%The \emph{selector} chooses scored designs to be passed to the simulator.
+%A variety of strategies may be applied here. For example, following an active learning strategy, it may select a mix of high-scoring and high-uncertainty designs.
+%
+%\item
+%The \emph{evaluator} applies one or several more expensive methods to the designs passed on by the selector, with the goal of obtaining more accurate 
+%values for the properties that those methods determine. 
+%In the work that we perform here, these methods always involve simulations, but in other cases they could involve experiments.
+%
+%\end{itemize}
+%
+%The results computed by the evaluator must eventually feedback to the other phases to influencing the future behavior of the generator, scorer, and/or evaluator. 
+%We explain how this feedback occurs in later sections.
+
+
+
+\section{Implementing the RL architecture: An electrolyte design example}
+
+The computational requirements of a specific instantiation of the high-level architecture of Figure~\ref{fig:pipe} will vary greatly
+according to the nature of the problem being solved.
+We use a specific example to illustrate issues. 
 
 \subsection{Logical architecture}
 
@@ -221,17 +313,15 @@ Do we want method servers to update store directly, etc.?
   \includegraphics[width=0.9\textwidth,trim=0in 0in 0in 0in,clip]{./Figs/sketch.png}
   %}}
   \vspace{-1.5ex}
-  \caption{TBD}
+  \caption{A logical view of a RL pipeline used for electrolyte design. Models A, B, and C are ML models and M and N are simulation models.}
 \label{fig:sketch}
 \end{figure}
 
-
-
-Figure~\ref{fig:sketch} shows the four components of the discovery workflow plus different methods: 
+Figure~\ref{fig:sketch} shows the four components of a materials discovery workflow plus different methods: 
 the Q-agent, three ML methods (\textbf{A}, \textbf{B}, \textbf{C}), and two simulation methods (\textbf{M}, \textbf{N}).
-
 The various components can run synchronously or asynchronously, depending on whether an RL agent that generates a set of designs, \emph{X}, does or does not wait, respectively, for A and C to be updated based on \textbf{M}(\emph{X’}) and \textbf{N}(\emph{X’}) (\emph{X’} $\subset$ \emph{X})  before starting the next cycle. We need to evaluate how this effects results obtained.
 
+Initial 
 
 
 \begin{figure}
@@ -263,7 +353,7 @@ We envision this process involving calls to method servers,
 %Size: These may each be a single process, with state (designs) maintained in the Store.
 
 
-\textbf{Method Servers, Results Servers, Trainers}: 
+\textbf{Method Servers, Value Servers, Trainers}: 
 Synopsis: These components dispatch tasks to the Executor and coordinate activities with each other, with state maintained in the Store.
 Size: These may each be a single process, with state (e.g., values) maintained in Store.
 
@@ -280,15 +370,43 @@ Size: Perhaps tens of thousands of nodes and many terabytes of storage.
 
 \subsection{An example configuration}
 
-The following is an example of a configuration that we might deploy for the electrolyte design problem.
-
-\begin{itemize}
+The structure shown in Figure~\ref{fig:sketch} might result in the following configuration. 
+We have a total of 17 persistent services, as follows:
+\begin{itemize}\itemsep-0.2em
 \item
-
-
+The generator, scorer, selector, and evaluator, as described above.
 \item
-
+Five method servers, for \textbf{A}, \textbf{B}, \textbf{C}, \textbf{M}, and \textbf{N}.
+\item
+Five value servers, one per method server.
+\item
+Three trainers, one for each of \textbf{A}, \textbf{B}, and \textbf{C}.
 \end{itemize}
+
+\q{What about Q-trainer and Q value server?}
+
+The generator runs repeatedly, using RL methods to generate perhaps \num{20000} candidates in 30 minutes.
+Each candidate is represented by a SMILES string at this point, so space requirements are small.
+It may take perhaps 1 minute to score those candidates, assuming a few milliseconds per scoring operation,
+and a few seconds to select the top \num{1000} candidates for simulation.
+The simulation component is then the most expensive, requiring perhaps 10 node-hours to simulate each candidate,
+for a total of \num{100000} node hours.
+The other expensive task is retraining models \textbf{B} and \textbf{C}, which 
+
+%\begin{tabular}{| l }
+%Component & Input & Output & Cost & Retraining 
+%Generator & 
+%Scorer       &
+%Selector     &    
+%Evaluator   & 
+
+30 minutes for RL to generate 20K candidates
+1 minute to score 20K candidates
+A few seconds (?) to select top 1K candidates for simulation
+1K x N node-hours to simulate the 1K candidates (N not yet known)
+The expensive part (in terms of elapsed time) is perhaps the ML model retraining, which currently takes 24 hours on 100 Theta nodes
+ 
+
 
 
 \section{Method Descriptions}\label{sec:details}
@@ -387,10 +505,6 @@ Manage a task
 \item
 Set policies for resource allocation (?)
 \end{compactitem}
-
-
-
-\section{RL use case}
 
 
 
