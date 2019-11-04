@@ -45,12 +45,14 @@
 
 
 \title{Reinforcement Learning Workflow and Requirements for Massively Parallel Implementation}
-%\author{Ian Foster}
+\author{}
 \date{November 2019}
 
 \begin{document}
 
 \maketitle
+
+\tableofcontents
 
 \section{Introduction}
 
@@ -184,13 +186,6 @@ how frequently to do this is a question of cost/accuracy tradeoffs.
 
 \subsection{Method servers, value servers, and trainers}
 
-The Generator, Scorer, and Evaluator components in Figure~\ref{fig:pipe} call various methods to estimate different properties of objects.
-We find it useful to introduce three additional types of components to encapsulate the major operations associated with methods,
-namely executing a method on an object, storing the resulting values, and (in the case of ML methods) retraining.  
-Figure~\ref{fig:server} shows these three components. 
-We describe each in turn and then examine their relationships.
-We provide more detailed descriptions in Section~\ref{sec:details}.
-
 \begin{wrapfigure}[11]{r}[0pt]{0.22\textwidth}
 \vspace{-2ex}
   \centering
@@ -201,6 +196,14 @@ We provide more detailed descriptions in Section~\ref{sec:details}.
   \caption{Method server and other components.
 \label{fig:server}}
 \end{wrapfigure}
+
+The Generator, Scorer, and Evaluator components in Figure~\ref{fig:pipe} call various methods to estimate different properties of objects.
+We find it useful to introduce three additional types of components to encapsulate the major operations associated with methods,
+namely executing a method on an object, storing the resulting values, and (in the case of ML methods) retraining.  
+Figure~\ref{fig:server} shows these three components. 
+We describe each in turn and then examine their relationships.
+We provide more detailed descriptions in Section~\ref{sec:details}.
+
 
 
 \begin{itemize}
@@ -395,7 +398,72 @@ One executor and one store.
 
 
 
-\section{Method Descriptions}\label{sec:details}
+
+
+
+
+
+\section{Requirements for HPC system software}
+
+\begin{enumerate}
+\item
+Task creation and management within a single HPC session.
+\begin{enumerate}
+\item Creation of persistent and transient processes.We want to be able to allocate \textbf{N} $\ge$  \textbf{A} +  \textbf{B} +  \textbf{C} nodes and then:
+\begin{enumerate}
+\item
+Start  \textbf{A} persistent manager processes, each on a single node
+\item
+Run many transient single-node tasks on another \textbf{B} nodes. (If using Parsl, that means starting B persistent worker processes on B nodes.)
+\item
+Run many transient multiple-node MPI computations on  \textbf{C} nodes.
+\end{enumerate}
+\item
+Where managers can monitor (e.g., detect failure) and manage (e.g., terminate, restart) their workers and MPI computations
+\end{enumerate}
+\item
+Communication:
+\begin{enumerate}
+\item
+Managers can pass information to the single-node tasks of (ii) above and the MPI computations of (iii) above, and get results back. I.e., conventional Parsl functional semantics.
+\item
+Managers can communicate in some convenient manner (e.g., message passing)
+\item
+Processes can also read and write a shared RAM / NVRAM store
+\end{enumerate}
+\end{enumerate}
+
+For example, in the electrolyte design problem, we might have \textbf{A}=20, \textbf{B}=100, and \textbf{C}=880, for \textbf{N}=1000.
+
+
+\section{Implementation approaches}
+
+\subsection{MPI\_Comm\_launch}
+
+\underline{Task creation and management}: 
+My understanding is that with \texttt{MPI\_Comm\_launch}~\cite{wozniak2019mpi} and Parsl~\cite{babuji19parsl}, 
+we can implement much of the task creation and management capabilities described above on a Linux cluster, but not on Summit or Theta.
+Specifically, we can use \texttt{MPI\_Comm\_launch} first to start the persistent services and a set of Parsl workers, to which we can dispatch the fine-grained tasks,
+and then to start sets of MPI computations, detect when individual computations terminate, and start new computations, as needed.
+What we cannot do is to stop MPI computations once started. That is likely not important.
+
+\underline{Communication}: The various processes created in the ways just described can communicate via MPI mechanisms.
+The question remains of how to create a Store.
+
+\subsection{RADICAL-Pilot}
+
+This paper describes creating many fine-grained tasks on Summit~\cite{turilli2019characterizing}, but via the scheduler, I think?
+
+\subsection{Other approaches?}
+
+TBD
+
+
+\section{Service Descriptions}\label{sec:details}
+
+We outline what we think are the internal state and operations supported by the method server, result server, trainer, and executor.
+
+\vspace{2ex}
 
 \noindent
 \textbf{Method server}\\
@@ -425,7 +493,7 @@ Update method (if ML method)
 \vspace{2ex}
 
 \noindent
-\textbf{Results server}\\
+\textbf{Value server}\\
 State:
 \begin{compactitem}
 \item
@@ -493,43 +561,9 @@ Set policies for resource allocation (?)
 \end{compactitem}
 
 
-
-
-
-\section{Requirements}
-
-\begin{enumerate}
-\item
-Task creation and management within a single HPC session.
-\begin{enumerate}
-\item Creation of persistent and transient processes.We want to be able to allocate \textbf{N} $\ge$  \textbf{A} +  \textbf{B} +  \textbf{C} nodes and then:
-\begin{enumerate}
-\item
-Start  \textbf{A} persistent manager processes, each on a single node
-\item
-Run many transient single-node tasks on another \textbf{B} nodes. (If using Parsl, that means starting B persistent worker processes on B nodes.)
-\item
-Run many transient multiple-node MPI computations on  \textbf{C} nodes.
-\end{enumerate}
-\item
-Where managers can monitor (e.g., detect failure) and manage (e.g., terminate, restart) their workers and MPI computations
-\end{enumerate}
-\item
-Communication:
-\begin{enumerate}
-\item
-Managers can pass information to the single-node tasks of (ii) above and the MPI computations of (iii) above, and get results back. I.e., conventional Parsl functional semantics.
-\item
-Managers can communicate in some convenient manner (e.g., message passing)
-\item
-Processes can also read and write a shared RAM / NVRAM store
-\end{enumerate}
-\end{enumerate}
-
-My understanding is that with \texttt{MPIX\_Comm\_launch}, we can do this all on a Linux cluster, but not on Summit or Theta, and without the convenience of Parsl and Radical.
-
-
-
+%\addcontentsline{toc}{chapter}{Literature cited}
+\bibliographystyle{unsrt}
+\bibliography{refs}
 
 
 \end{document}
