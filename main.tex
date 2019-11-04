@@ -447,13 +447,18 @@ we can implement much of the task creation and management capabilities described
 Specifically, we can use \texttt{MPI\_Comm\_launch} first to start the persistent services and a set of Parsl workers, to which we can dispatch the fine-grained tasks,
 and then to start sets of MPI computations, detect when individual computations terminate, and start new computations, as needed.
 What we cannot do is to stop MPI computations once started. That is likely not important.
+\q{Yadu: Parsl's general approach is to use the scheduler and system launcher(aprun on theta, jsrun on summit) to partition a job into a static set of chunks each with a Pilot(node-manager). Once partitioned, the managers retrieve and execute functions with ~10ms overhead. Some of the slicing specification will be manual, but it is not hard. There are some rough edges here around affinitizing tasks to the right pilots and dealing with the launch mechanisms expected by MPI applications.
+}
 
 \underline{Communication}: The various processes created in the ways just described can communicate via MPI mechanisms.
 The question remains of how to create a Store.
+\q{Yadu:Do we have a guess for the volume and velocity? of the data in/out required of the store?}
 
 \subsection{RADICAL-Pilot}
 
 This paper describes creating many fine-grained tasks on Summit~\cite{turilli2019characterizing}, but via the scheduler, I think?
+
+\q{Yadu:Launching fine-grained tasks via the new PMIx interface which allows dynamically slicing a scheduler job after it is launched. I'd guess that launches are on the order of seconds not ms, fast enough to launch pilots, but not functions. Very cool functionality if the requirements of the train elements for multi-node MPI were to change}
 
 \subsection{Other approaches?}
 
