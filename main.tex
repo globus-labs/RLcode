@@ -50,7 +50,7 @@
 
 
 
-\title{Reinforcement Learning Workflow and Requirements for Massively Parallel Implementation}
+\title{The ExaLearn Reinforcement Learning Workflow and Requirements for Massively Parallel Implementation}
 \author{}
 \date{November 2019}
 
@@ -79,7 +79,7 @@ It uses a cheap method (e.g., a simple ML model) to obtain rough estimates of de
 
 \item
 The \emph{scorer} applies one or more methods to each design passed to it by the generator, 
-and the passes the design plus the resulting values (the design's ``score'') to the selector. 
+and then passes the design plus the resulting values (the design's ``score'') to the selector. 
 The methods used here for scoring are typically ML models that can be executed quickly, because they must be applied to many designs.
 % These are typically lower-cost (and thus lower-accuracy) methods because they need to be applied to many designs.
 
@@ -106,7 +106,7 @@ In the work that we perform here, these methods always involve simulations, but 
 \end{figure}
 
 
-The results computed by the evaluator must eventually feed back to the other phases to influencing the future behavior of the generator, scorer, and/or evaluator. 
+The results computed by the evaluator must eventually feed back to the other phases to influence the future behavior of the generator, scorer, and/or evaluator. 
 (For example, simulation outputs may be used to retrain the ML models used in the generator and scoring phases.)
 The RL process is then repeated.
 We discuss the feedback process in later sections.
