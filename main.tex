@@ -39,10 +39,15 @@
 \usepackage{siunitx}
 \sisetup{detect-all}
 \usepackage{appendix}
+\usepackage{comment}
 
 \usetikzlibrary{shapes.misc, positioning}
 
+% For discussion questions?
 \newcommand\q[1]{{\color{blue}[Q: #1]}}
+\newcommand\yadu[1]{{\color{red}[Yadu: #1]}}
+
+
 
 
 \title{Reinforcement Learning Workflow and Requirements for Massively Parallel Implementation}
@@ -171,7 +176,7 @@ $E^{\textrm{B3}}, E^{\textrm{G4}} \prec E^{\textrm{$\Delta$(B3, G4)}}$: see Figu
 \label{fig:deps}}
 \end{wrapfigure}
 
-A new value for a method $Q$, i.e., an addition to \textbf{V}($Q$), may motivate updates to ML methods $Q’$ s.t. $Q \prec Q’$. 
+A new value for a method $Q$, i.e., an addition to \textbf{V}($Q$), may motivate updates to ML methods $Q'$ s.t. $Q \prec Q'$. 
 (We say ``may'' because we likely will not want to update methods for every new value.)
 For example:
 \begin{itemize}\itemsep-0.2em 
@@ -203,7 +208,7 @@ We find it useful to introduce three additional types of components to encapsula
 namely executing a method on an object, storing the resulting values, and (in the case of ML methods) retraining.  
 Figure~\ref{fig:server} shows these three components. 
 We describe each in turn and then examine their relationships.
-We provide more detailed descriptions in Section~\ref{sec:details}.
+%We provide more detailed descriptions in Section~\ref{sec:details}.
 
 
 
@@ -256,15 +261,15 @@ The generator then repeatedly deepens the design space, as follows (see Figure~\
 For each action $a$ that is possible from current state $s$:
 \begin{compactitem}
 \item
-Determine new state $s’$
+Determine new state $s'$
 \item
-Use $R$ to determine reward for $s’$
+Use $R$ to determine reward for $s'$
 \item
-Use $Q$ to estimate value for $s’$: val($s’$) = max$_a$ $Q$($s’$, $a$)
+Use $Q$ to estimate value for $s'$: val($s'$) = max$_a$ $Q$($s'$, $a$)
 \item
-Record ($s$, $s’$, $R$($s’$)) in \textbf{V}($Q$)
+Record ($s$, $s'$, $R$($s'$)) in \textbf{V}($Q$)
 \item
-Select new state $s’$, e.g., the one with largest $R$($s’$) + val($s’$)
+Select new state $s'$, e.g., the one with largest $R$($s'$) + val($s'$)
 \end{compactitem}
 \item
 Periodically, update $Q$ by retraining based on available \textbf{V}($Q$). Retraining can be synchronous or asynchronous.
@@ -388,7 +393,7 @@ One executor and one store.
 
 \q{What about Q-trainer and Q value server?}
 
-
+\q{How generic should the algorithm control module be?  Do we want something as generic as EMEWS?  }
 
 %\begin{tabular}{| l }
 %Component & Input & Output & Cost & Retraining 
@@ -406,6 +411,8 @@ One executor and one store.
 
 \section{Requirements for HPC system software}
 
+We need mechanisms that can provide the following functionality on Summit and Theta/Aurora.
+
 \begin{enumerate}
 \item
 Task creation and management within a single HPC session.
@@ -417,7 +424,7 @@ Start  \textbf{A} persistent manager processes, each on a single node
 \item
 Run many transient single-node tasks on another \textbf{B} nodes. (If using Parsl, that means starting B persistent worker processes on B nodes.)
 \item
-Run many transient multiple-node MPI computations on  \textbf{C} nodes.
+Run many transient multiple-node MPI computations on \textbf{C} nodes.
 \end{enumerate}
 \item
 Where managers can monitor (e.g., detect failure) and manage (e.g., terminate, restart) their workers and MPI computations
@@ -426,7 +433,7 @@ Where managers can monitor (e.g., detect failure) and manage (e.g., terminate, r
 Communication:
 \begin{enumerate}
 \item
-Managers can pass information to the single-node tasks of (ii) above and the MPI computations of (iii) above, and get results back. I.e., conventional Parsl functional semantics.
+Managers can pass information to the single-node tasks of (ii) above and the MPI computations of (iii) above, and get results back. E.g., conventional Parsl functional semantics.
 \item
 Managers can communicate in some convenient manner (e.g., message passing)
 \item
@@ -439,30 +446,131 @@ For example, in the electrolyte design problem, we might have \textbf{A}=20, \te
 
 \section{Implementation approaches}
 
+The process structures required to implement the task creation and management mechanisms can be implemented in a variety of ways:
+\begin{itemize}
+    \item
+    Various systems provide system-dependent mechanisms for creating processes: e.g., \texttt{aprun} on Theta, \texttt{jsrun} on Summit. 
+    \item
+    The Process Management Interface -- Exascale (PMIx)~\cite{castain2018pmix}, \url{https://pmix.org}, defines an API for such capabilities.
+    The PMIx-based Reference RunTime Environment (PRRTE) provides a reference implementation of this API. However, while PRRTE is available on Summit, it is not available on Theta.
+    \item 
+    MPICH has a process manager called Hydra, I'm not sure what that can do.
+    \item
+    Systems like Balsam, MPI\_Comm\_launch~\cite{wozniak2019mpi}, Swift, and Parsl~\cite{babuji19parsl} all provide various forms of task management.
+    RADICAL-Pilot uses PRRTE on Summit.
+\end{itemize}
+
+It seems that the system-specific mechanisms provide us with what we need, 
+albeit with quite low-level and non-portable interfaces. 
+Other mechanisms provide greater portability and/or abstraction, 
+but are not available on both Summit and Theta.
+Thus we will likely want to use the Theta-specific mechanisms described in
+the next section to move forward.
+
+\subsection{Theta-specific mechanisms}
+
+On Theta, the \texttt{qsub} command is used to create a \emph{job}, to which are allocated a specified number of compute nodes for a specified time.
+Having created a job, the \texttt{aprun} command
+can be used to launch
+executables on one or more of the compute nodes allocated to the job.
+The programmer can detect when an \texttt{aprun} command completes,
+and launch new commands.
+An \texttt{aprun} command can launch a single-node application or a multiple-node MPI 
+application.
+\q{As far as I can tell: a) two \texttt{aprun} commands cannot start executables on the 
+same node, and b) a single \texttt{aprun} command can only start one executable. True?}
+Once started, applications can communicate with each other via TCP/IP, for example
+by using ZMQ. 
+The \texttt{aprun} command can only be run on specialized Machine Oriented Mini-server (MOM) nodes, which are not to be used to run compute- or data-intensive applications. 
+
+It would seem that we can use \texttt{aprun} to do everything that we need, as follows:
+\begin{enumerate} 
+\item 
+We create a manager process on a MOM that is
+responsible for launching all other processes.
+\item\label{item:2}
+The manager creates long-lived processes for the persistent tasks listed above:
+the method servers, value servers, trainers, Parsl managers, etc. 
+\item 
+The manager creates long-lived processes to act as Parsl workers,
+and passes the address of those workers to the method servers of step~\ref{item:2}
+so that they can send function execution requests to them.
+\q{Would we want the method server to send requests to a Parsl manager, which then
+sends them to a Parsl worker? Or is that an unnecessary / unacceptable level of indirection?}
+(Once configured in this way, a Parsl worker can retrieve and execute functions with $\sim$10ms overhead.)
+\item 
+The manager accepts subsequent requests to start MPI computations for simulation and trainer tasks. 
+\q{How do the values produced by these computations get stored appropriately, without involving the manager? 
+Maybe via the file system or an NVRAM virtual file system?}
+
+\end{enumerate} 
+
+\noindent
+Notes:
+\begin{itemize} 
+\item
+Yadu suggests that we can use a special version of the  Parsl manager, configured to run on a MOM, to start MPI tasks. Not clear whether that is desirable.
+\item
+ I don't yet know how to create a virtual file system or similar in RAM / NVRAM to hold intermediate results. (We likely should start by communicating via TCP or the file system.) [Zhao Zhang's CompresStore uses a ``trampoline'' to intercept I/O calls and pass them to his distributed cache process running on the same node, which retrieves the file contents, places it in the specified memory space, and then returns the memory address to the initial function.]
+\end{itemize}
+
+\vspace{1ex}
+
+\noindent 
+Note: \texttt{aprun} is the Application Level Placement Scheduler (ALPS) application launcher. That does not seem to be important information.
+
 \subsection{MPI\_Comm\_launch}
 
 \underline{Task creation and management}: 
+The idea with \texttt{MPI\_Comm\_Launch} is that there should be some portable C/C++/Fortran
+function that allows the execution of MPI subjobs within a greater MPI job, without the use of 
+vendor or scheduler -specific job launcher tools, sockets, etc.  \texttt{MPI\_Comm\_Launch} 
+would allow scientific codes to invoke other scientific codes to run subproblems or analysis.  It 
+would also allow the development of portable application frameworks and generic workflow systems.
+
+When \texttt{MPI\_Comm\_launch} is run on communicators created with \texttt{MPI\_Comm\_create\_group},
+MPI subjob execution can be totally dynamic, and subjobs can be created with varying size or layout in 
+response to application workflow needs.
+
 My understanding is that with \texttt{MPI\_Comm\_launch}~\cite{wozniak2019mpi} and Parsl~\cite{babuji19parsl}, 
-we can implement much of the task creation and management capabilities described above on a Linux cluster, but not on Summit or Theta.
+we can implement much of the task creation and management capabilities described above on a Linux cluster, but not currently on Summit or Theta.  
+
+There has been some interest from Cray and the MPI Forum.  The Cray \texttt{MPIX\_Comm\_rankpool()} function provides some of the \texttt{MPI\_Comm\_launch} functionality and is available on Theta.  If we had a killer app for this, we could go back to these groups with more motivating examples to get more features.
+
 Specifically, we can use \texttt{MPI\_Comm\_launch} first to start the persistent services and a set of Parsl workers, to which we can dispatch the fine-grained tasks,
 and then to start sets of MPI computations, detect when individual computations terminate, and start new computations, as needed.
 What we cannot do is to stop MPI computations once started. That is likely not important.
-\q{Yadu: Parsl's general approach is to use the scheduler and system launcher(aprun on theta, jsrun on summit) to partition a job into a static set of chunks each with a Pilot(node-manager). Once partitioned, the managers retrieve and execute functions with ~10ms overhead. Some of the slicing specification will be manual, but it is not hard. There are some rough edges here around affinitizing tasks to the right pilots and dealing with the launch mechanisms expected by MPI applications.
-}
+
+%\yadu{Parsl's general approach is to use the scheduler and system launcher (\texttt{aprun} on Theta, \texttt{jsrun} on Summit) to partition a job into a static set of chunks each with a Pilot(node-manager). Once partitioned, the managers retrieve and execute functions with $\sim$10ms overhead. Some of the slicing specification will be manual, but it is not hard. There are some rough edges here around affinitizing tasks to the right pilots and dealing with the launch mechanisms expected by MPI applications.}
 
 \underline{Communication}: The various processes created in the ways just described can communicate via MPI mechanisms.
 The question remains of how to create a Store.
-\q{Yadu:Do we have a guess for the volume and velocity? of the data in/out required of the store?}
+\yadu{Do we have a guess for the volume and velocity? of the data in/out required of the store?}
 
 \subsection{RADICAL-Pilot}
 
-This paper describes creating many fine-grained tasks on Summit~\cite{turilli2019characterizing}, but via the scheduler, I think?
+RADICAL-Pilot uses PMIx to create tasks on Summit~\cite{turilli2019characterizing}.
 
-\q{Yadu:Launching fine-grained tasks via the new PMIx interface which allows dynamically slicing a scheduler job after it is launched. I'd guess that launches are on the order of seconds not ms, fast enough to launch pilots, but not functions. Very cool functionality if the requirements of the train elements for multi-node MPI were to change}
+\yadu{Launching fine-grained tasks via the new PMIx interface which allows dynamically slicing a scheduler job after it is launched. I'd guess that launches are on the order of seconds not ms, fast enough to launch pilots, but not functions. Very cool functionality if the requirements of the train elements for multi-node MPI were to change}
+
 
 \subsection{Other approaches?}
 
-TBD
+Balsam may be useful \url{https://balsam.readthedocs.io/en/latest/}.
+Can it start persistent processes as well as manage queued jobs?
+
+Dakota https://dakota.sandia.gov
+
+Flux https://ieeexplore.ieee.org/document/8638377
+
+\section{Other capabilities required}
+
+\begin{enumerate}
+    \item 
+    \emph{Run NWChem/NWChemEx ensembles on Summit and Theta}.
+    See \url{https://balsam.readthedocs.io/en/latest/tutorial/nwchem.html} for information on how to do this with Balsam on Theta.
+    I have also asked Ray Bair as to whether he can help from the NWChemEx project.
+\end{enumerate}
 
 %\addcontentsline{toc}{chapter}{Literature cited}
 \bibliographystyle{unsrt}
@@ -471,9 +579,11 @@ TBD
 \addcontentsline{toc}{section}{Appendices}
 \appendix
 \appendixpage
+
+\begin{comment}
 \section{Service Descriptions}\label{sec:details}
 
-We outline what we think are the internal state and operations supported by the method server, result server, trainer, and executor.
+We outline what we think are the internal state and operations supported by the method server, value server, trainer, and executor.
 
 \vspace{3ex}
 
@@ -484,19 +594,19 @@ State:
 \item
 Identity of method, $M$, to be applied
 \item
-Identity of results server, $R$
+Identity of associated value server, $S_V$
 \item
 Identify of executor, $E$
 \end{compactitem}
 Functions:
 \begin{compactitem}
 \item 
-Score a design using method:
+Score a design $D$ using method:
 \begin{compactitem}
 \item
-Send task $M$(design) to $E$
+Send task $M$(design) to $E$, and wait for returned $V$
 \item
-Send result to $R$
+Send ($D$, $V$) to $S_V$
 \end{compactitem}
 \item
 Update method (if ML method) 
@@ -530,9 +640,9 @@ Archive old values on model update (?)
 State:
 \begin{compactitem}
 \item
-Identify of results server, $R$
+Identify of value server, $S_V$
 \item
-Identify of methods server, $M$
+Identify of method server, $S_M$
 \item
 Identity of executor, $E$
 \end{compactitem}
@@ -541,13 +651,12 @@ Functions:
 \item
 Retrain ML model
 \item
-Retrieve values from R
+Retrieve values from $S_V$
 \item
-Send task to E to retrain model 
+Send task to $E$ to retrain model 
 \item
-Update model in M
+Update model in $S_M$
 \end{compactitem}
-
 
 \vspace{3ex}
 
@@ -571,6 +680,125 @@ Manage a task
 \item
 Set policies for resource allocation (?)
 \end{compactitem}
+\end{comment}
 
+\section{Pseudo-code}
+
+\vspace{3ex}
+\noindent
+\textbf{Executor}
+
+\noindent
+This service is charged with creating the initial set of persistent services and with processing requests to create, and managing the execution of, transient MPI computations.
+
+\begin{tabbing}
+\=\=aaaa\=aaaa\=aaaa\=\kill
+\>\> \texttt{requestQueue = []} \\
+\>\> \# Create persistent processes and collect contact information \\
+\>\> \texttt{for i in persistents:}\\
+\>\>\> \texttt{info[i] = aprun(persistents[i])}\\
+\>\> \texttt{distribute info to all persistent processes}\\
+\>\> \texttt{freeNodes = numnodes() - size(persistents)}\\
+\>\>\# Process events\\
+\>\> \texttt{repeat:}\\
+\>\>\> \texttt{if persistent process has failed:} \\
+\>\>\>\> \texttt{panic()} \\
+\>\>\> \texttt{if requested to start an MPI task $M$:}\\
+\>\>\>\> \texttt{if size($M$) $<$= freeNodes:}\\
+\>\>\>\>\> \texttt{start MPI task} \\
+\>\>\>\>\> \texttt{freeNodes -= size($M$)}\\
+\>\>\>\> \texttt{else:}\\
+\>\>\>\>\> \texttt{queue($M$)}\\
+\>\>\> \texttt{if an MPI task $T$ completes:}\\
+\>\>\>\> \texttt{do something with the value returned}\\
+\>\>\>\> \texttt{freeNodes += size($T$)}\\
+\>\>\> \texttt{if queued task:} \\
+\>\>\>\> \texttt{start queued task if there are enough free nodes}
+\end{tabbing}
+
+
+\vspace{3ex}
+\noindent
+\textbf{Method server}
+
+\noindent
+This service is configured with the address of the service to which it should send method execution requests (either the Executor, for MPI computations, or the Parsl manager, for lightweight functions), the address of its associated value server, and the details of its method. It responds to requests to execute methods 
+
+
+\begin{tabbing}
+\=\=aaaa\=aaaa\=aaaa\=\kill
+\>\> \texttt{info = obtainInfoFromExecutor()}\\
+\>\> \# \texttt{methodRunner} is Executor for simulation model or ParslManager for ML model\\
+\>\> \texttt{methodRunner = extractRunnerInfo(info)}\\ 
+\>\> \texttt{valueServer = extractValueServerInfo(info)}\\
+\>\> \texttt{myMethod = initializeMethod()}\\
+\>\>\# Process events\\
+\>\> \texttt{repeat:}\\
+\>\>\> \texttt{if method request, $R$:} \\
+\>\>\>\> \texttt{send request myMethod($R$) to methodRunner}\\
+\>\>\>\> \texttt{wait for value, $V$}\\
+\>\>\>\> \texttt{send value ($R$, $V$) to valueServer} \\
+\>\>\>\> \texttt{return value $V$ to requestor}\\
+\>\>\> \texttt{if update request, $U$:} \\
+\>\>\>\> \texttt{update myMethod with $U$}\\
+\>\>\>\> \emph{maybe also tell valueServer to archive old data}\\
+\>\>\>\> \texttt{acknowledge to requestor}
+\end{tabbing}
+
+\vspace{3ex}
+\noindent
+\textbf{Value server}
+
+\noindent
+This service processes requests from its associated method server to store values,
+and (in the case of an ML method) from its associated trainer to retrieve values.
+We may also want it to notify registered servers when a specified number of new values have been received, so that they can retrain.
+
+\vspace{3ex}
+\noindent
+\textbf{Trainer}
+
+\noindent
+This service processes requests to retrain an ML model.
+It will likely be configured with the address of the value server from which it should retrieve values.
+
+\vspace{3ex}
+\noindent
+\textbf{Generator}
+
+\noindent
+This service is created by the Executor and supplied with the address of the 
+Scorer and of any method server(s) that it needs to access, plus also information
+about the design(s) that should be used as starting points for generation.
+It repeatedly uses an RL algorithm to generate candidate designs,
+which it passes on to the Scorer, either via a message or the file system.
+
+\vspace{3ex}
+\noindent
+\textbf{Scorer}
+
+\noindent
+This service is created by the Executor and supplied with the address of the 
+Selector and of any method server(s) that it needs to access.
+It accepts designs from the Generator, scores them, and passes on the scored
+designs to the Selector.
+
+\vspace{3ex}
+\noindent
+\textbf{Selector}
+
+\noindent
+This service is created by the Executor and supplied with the address of the 
+Evaluator and of any method server(s) that it needs to access.
+It accepts designs from the Scorer, selects a subset of them,
+and passes on that subset to the Evaluator.
+
+\vspace{3ex}
+\noindent
+\textbf{Evaluator}
+
+\noindent
+This service is created by the Executor and supplied with the address of any method server(s) that it needs to access.
+It accepts designs from the Selector and applies its configured methods(s) to each.
 
 \end{document}
